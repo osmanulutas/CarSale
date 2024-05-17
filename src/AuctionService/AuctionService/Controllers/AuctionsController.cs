@@ -3,6 +3,8 @@ using AuctionService.Dtos;
 using AuctionService.Entities;
 using AutoMapper;
 using AutoMapper.QueryableExtensions;
+using Contracts;
+using MassTransit;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,10 +12,11 @@ namespace AuctionService.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    public class AuctionsController(AuctionDbContext context, IMapper mapper) : ControllerBase
+    public class AuctionsController(AuctionDbContext context, IMapper mapper, IPublishEndpoint publishEndpoint) : ControllerBase
     {
         private readonly AuctionDbContext _context = context;
         private readonly IMapper _mapper = mapper;
+        private readonly IPublishEndpoint _publishEndpoint = publishEndpoint;
 
 
         [HttpGet]
@@ -24,9 +27,8 @@ namespace AuctionService.Controllers
             {
                 query = query.Where(x => x.UpdatedAt.CompareTo(DateTime.Parse(date).ToUniversalTime()) > 0);
             }
-
+            
             return await query.ProjectTo<AuctionDto>(_mapper.ConfigurationProvider).ToListAsync();
-
         }
 
 
@@ -58,12 +60,18 @@ namespace AuctionService.Controllers
             auction.Seller = "test";
 
             _context.Auctions.Add(auction);
+
+            var newAuction = _mapper.Map<AuctionDto>(auction);
+            await _publishEndpoint.Publish(_mapper.Map<AuctionCreated>(newAuction));
+
             var result = await _context.SaveChangesAsync() > 0;
+
+
+
             if (!result)
-            {
                 return BadRequest("Cloud not save changes to the DB");
-            }
-            return CreatedAtAction(nameof(GetAuction), new { id = auction.Id }, _mapper.Map<AuctionDto>(auction));
+            
+            return CreatedAtAction(nameof(GetAuction), new { id = auction.Id },newAuction);
         }
         [HttpPut("{id}")]
         public async Task<ActionResult> UpdateAuction(Guid id, UpdateAuctionDto updateAuctionDto)
